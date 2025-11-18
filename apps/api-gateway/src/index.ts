@@ -1,6 +1,7 @@
+import 'dotenv/config';
 import Fastify from 'fastify';
 import authRoutes from './routes/auth.route.js';
-import 'dotenv/config';
+
 
 const app = Fastify();
 
