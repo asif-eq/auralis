@@ -1,0 +1,53 @@
+version: '3.8'
+
+
+services:
+  postgres:
+    image: postgres:15
+    container_name: auralis-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    ports:
+      - "${POSTGRES_PORT}:5432"
+    volumes:
+      - ./volumes/postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+
+  redis:
+    image: redis:7
+    container_name: auralis-redis
+    ports:
+      - '6379:6379'
+    volumes:
+      - ./volumes/redis:/data
+    restart: unless-stopped
+
+
+  minio:
+    image: minio/minio
+    container_name: auralis-minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    ports:
+      - '9000:9000'
+      - '9001:9001'
+    volumes:
+      - ./volumes/minio:/data
+    restart: unless-stopped
+
+
+volumes:
+  postgres:
+  redis:
+  minio:
+
