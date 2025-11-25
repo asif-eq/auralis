@@ -1,14 +1,23 @@
-export async function joinMeeting(page, meetUrl: string) {
-  await page.goto(meetUrl, { waitUntil: 'networkidle' })
+import { BrowserContext, Page } from 'playwright';
+import { launchPersistentBrowser } from './launchBrowser';
+import { logger } from '../utils/logger';
 
-  // Disable mic & camera
-  await page.keyboard.press('KeyM')
-  await page.keyboard.press('KeyC')
+export async function joinMeeting(meetUrl: string): Promise<{ page: Page; context: BrowserContext }> {
+  const context = await launchPersistentBrowser();
+  const page = await context.newPage(); // Create a Page from BrowserContext
 
-  // Click 'Join now'
-  await page.waitForSelector('button[jsname="Qx7uuf"]', { timeout: 15000 })
-  await page.click('button[jsname="Qx7uuf"]')
+  await page.goto(meetUrl, { waitUntil: 'networkidle' }); // Use page.goto, not context.goto
 
-  // Wait inside meeting
-  await page.waitForSelector('[data-unified-share-panel]', { timeout: 20000 })
+  // Click "Join now" button if present
+  try {
+    await page.waitForSelector('button[jsname="Qx7uuf"]', { timeout: 15000 });
+    await page.click('button[jsname="Qx7uuf"]');
+    logger.info('Clicked "Join now" button');
+  } catch (err) {
+    logger.warn('Could not automatically click "Join now":', err);
+  }
+
+  return { page, context }; // Return both
 }
+
+

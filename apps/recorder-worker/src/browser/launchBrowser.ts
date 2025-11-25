@@ -1,15 +1,14 @@
-import { chromium } from 'playwright'
+import { chromium, BrowserContext } from 'playwright';
 
-export async function launchBrowser() {
-  const browser = await chromium.launch({
-    headless: true,
-    args: ['--use-fake-ui-for-media-stream']
-  })
+export async function launchPersistentBrowser(): Promise<BrowserContext> {
+  const context = await chromium.launchPersistentContext('.chrome-profile', {
+    headless: false,
+    args: ['--disable-blink-features=AutomationControlled']
+  });
 
-  const context = await browser.newContext({
-    permissions: ['microphone', 'camera'],
-    viewport: { width: 1280, height: 720 }
-  })
-
-  return { browser, context }
+  return context; //
 }
+
+
+
+

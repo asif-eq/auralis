@@ -10,7 +10,7 @@ export async function startRecording({
 }: StartRecordingOptions): Promise<RecordingHandle> {
   if (!meetUrl) throw new Error('meetUrl is required')
 
-  // 1️⃣ Launch Playwright Chromium
+  //  Launch Playwright Chromium
   const browser: Browser = await chromium.launch({ headless: false })
   const context = await browser.newContext({
     permissions: ['microphone', 'camera']
@@ -18,7 +18,7 @@ export async function startRecording({
   const page: Page = await context.newPage()
   await page.goto(meetUrl)
 
-  // 2️⃣ Join meeting and mute mic/camera
+  //  Join meeting and mute mic/camera
   try {
     await page.locator('button[aria-label="Turn off microphone"]').click()
     await page.locator('button[aria-label="Turn off camera"]').click()
@@ -28,7 +28,7 @@ export async function startRecording({
   await page.locator('button[aria-label="Join now"]').click()
   console.log('Joined meeting:', meetUrl)
 
-  // 3️⃣ Start ffmpeg recording
+  // Start ffmpeg recording
   const filePath = outputPath || path.resolve(`tmp/meeting-${Date.now()}.mp4`)
   const ffmpeg: ChildProcessWithoutNullStreams = spawn('ffmpeg', [
     '-y',
@@ -41,7 +41,7 @@ export async function startRecording({
   ffmpeg.stdout.on('data', (data) => console.log(`ffmpeg: ${data}`))
   ffmpeg.stderr.on('data', (data) => console.error(`ffmpeg: ${data}`))
 
-  // 4️⃣ Return handle to stop recording
+  // Return handle to stop recording
   const handle: RecordingHandle = {
     stop: () =>
       new Promise<void>((resolve, reject) => {
