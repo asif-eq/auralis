@@ -35,3 +35,8 @@ pnpm-debug.log*
 # Optional: skip lockfile if you prefer clean repos
 pnpm-lock.yaml
 
+# chrome sessions
+chrome-profile/
+apps/recorder-worker/.chrome-profile/
+chrome-profile/
+
