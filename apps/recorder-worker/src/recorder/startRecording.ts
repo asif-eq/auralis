@@ -1,58 +1,39 @@
-import { chromium, Browser, Page } from 'playwright'
-import { spawn, ChildProcessWithoutNullStreams } from 'child_process'
-import path from 'path'
-import { StartRecordingOptions, RecordingHandle } from '../types'
+// apps/recorder-worker/src/recorder/startRecording.ts
 
-export async function startRecording({
-  meetUrl,
-  outputPath,
-  durationSeconds = 15
-}: StartRecordingOptions): Promise<RecordingHandle> {
-  if (!meetUrl) throw new Error('meetUrl is required')
 
-  //  Launch Playwright Chromium
-  const browser: Browser = await chromium.launch({ headless: false })
-  const context = await browser.newContext({
-    permissions: ['microphone', 'camera']
-  })
-  const page: Page = await context.newPage()
-  await page.goto(meetUrl)
+import { spawn } from 'child_process';
+import path from 'path';
+import fs from 'fs';
 
-  //  Join meeting and mute mic/camera
-  try {
-    await page.locator('button[aria-label="Turn off microphone"]').click()
-    await page.locator('button[aria-label="Turn off camera"]').click()
-  } catch {
-    // ignore if buttons not found
-  }
-  await page.locator('button[aria-label="Join now"]').click()
-  console.log('Joined meeting:', meetUrl)
+export async function startRecording(meetingId: string) {
+  const output = path.resolve(`./recordings/${meetingId}.mkv`);
+  fs.mkdirSync('./recordings', { recursive: true });
 
-  // Start ffmpeg recording
-  const filePath = outputPath || path.resolve(`tmp/meeting-${Date.now()}.mp4`)
-  const ffmpeg: ChildProcessWithoutNullStreams = spawn('ffmpeg', [
-    '-y',
-    '-f', 'avfoundation', // macOS screen+audio example
-    '-i', '1:0',          // screen:audio device
-    '-t', durationSeconds.toString(),
-    filePath
-  ])
+  console.log(`🎥 Recording started -> ${output}`);
 
-  ffmpeg.stdout.on('data', (data) => console.log(`ffmpeg: ${data}`))
-  ffmpeg.stderr.on('data', (data) => console.error(`ffmpeg: ${data}`))
+  const ffmpeg = spawn('ffmpeg', [
+    // input from display
+    '-f', 'avfoundation',
+    '-i', '1',                     // <--- macOS display input index (we will detect if needed)
 
-  // Return handle to stop recording
-  const handle: RecordingHandle = {
-    stop: () =>
-      new Promise<void>((resolve, reject) => {
-        ffmpeg.on('exit', () => {
-          browser.close().then(resolve).catch(reject)
-        })
-        ffmpeg.kill('SIGINT')
-      }),
-    filePath
-  }
+    // video capture
+    '-vcodec', 'libx264',
+    '-preset', 'fast',
 
-  return handle
+    // audio (system audio) — requires BlackHole/Loopback
+    '-acodec', 'aac',
+    '-b:a', '128k',
+    
+    // save file
+    output
+  ]);
+
+  ffmpeg.stderr.on('data', data => {
+    const text = data.toString();
+    if (text.includes('frame=')) process.stdout.write(`🟢 Capturing video...\r`);
+  });
+
+  ffmpeg.on('close', () => console.log(`📁 Recording saved -> ${output}`));
+
+  return ffmpeg;
 }
-

@@ -39,4 +39,8 @@ pnpm-lock.yaml
 .chrome-profile/
 apps/recorder-worker/.chrome-profile/
 chrome-profile/
+guest-profile/
+
+# Recordings
+recordings/
 
