@@ -6,7 +6,9 @@ import { spawn } from 'child_process';
 import fs from 'fs';
 
 async function startRecording(meetingId: string) {
-  const output = path.resolve(`./recordings/${meetingId}.mkv`);
+  // Timestamped filename
+  const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const output = path.resolve(`./recordings/${meetingId}-${timestamp}.mkv`);
   fs.mkdirSync('./recordings', { recursive: true });
 
   console.log(`🎥 Recording started -> ${output}`);
@@ -14,7 +16,7 @@ async function startRecording(meetingId: string) {
   const ffmpeg = spawn('ffmpeg', [
     '-f', 'avfoundation',
     '-framerate', '30',
-    '-i', '1:1',           // macOS: screen:system audio
+    '-i', '1:1',           // screen + system audio
     '-vcodec', 'libx264',
     '-preset', 'fast',
     '-acodec', 'aac',
@@ -33,7 +35,7 @@ async function startRecording(meetingId: string) {
 }
 
 async function main() {
-  const userDataDir = path.resolve('/Users/asif/Library/Application Support/Google/Chrome/Profile 2');
+  const userDataDir = path.resolve('/Users/asif/Library/Application Support/Google/Chrome/Default');
 
   const context: BrowserContext = await chromium.launchPersistentContext(userDataDir, {
     headless: false,
@@ -41,11 +43,14 @@ async function main() {
     args: [
       '--disable-blink-features=AutomationControlled',
       '--disable-infobars',
-      '--use-fake-ui-for-media-stream',
-      '--use-fake-device-for-media-stream',
-      '--enable-usermedia-screen-capturing',
+      '--use-fake-ui-for-media-stream',     // auto-allow permissions
+      '--use-fake-device-for-media-stream', // fake mic + camera
+      '--enable-usermedia-screen-capturing', 
       '--auto-select-desktop-capture-source=Google Meet',
       '--no-sandbox',
+      '--mute-audio',                        // optional, ensures no sound from bot
+      // '--disable-audio-input',
+
     ],
   });
 
@@ -81,11 +86,14 @@ async function main() {
   }
 
   console.log("🎥 You're now inside the meeting — starting recording...");
+
+  // Start recording (timestamped)
   const ffmpeg = await startRecording('test-meeting');
 
-  // Stop recording automatically after 30 seconds
+  // For MVP, stop after 30 seconds
   await page.waitForTimeout(30 * 1000);
   ffmpeg.kill('SIGINT');
+
   console.log("⏹ Recording stopped after 30 seconds");
 
   await context.close();

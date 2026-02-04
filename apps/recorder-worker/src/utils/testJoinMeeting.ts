@@ -1,22 +1,39 @@
-import { joinMeeting } from '../browser/joinMeeting';
-import { logger } from './logger';
+import { GoogleMeetAdapter } from '../platforms/google-meet/adapter'
+import { recordMeeting } from '../recorder/record'
 
-async function test() {
-  const meetUrl = process.env.MEET_URL || 'https://meet.google.com/rjb-gmcd-rqg';
+async function main() {
+  // HARD-CODED TEST VALUES (same as before)
+  const meetingUrl = 'https://meet.google.com/qwr-umng-kuy'
+  const meetingId = 'test-meeting-auralis'
+  const userDataDir = `/tmp/auralis-bot/${meetingId}`
+
+  console.log('Starting test recorder bot...')
+  console.log('Meeting URL:', meetingUrl)
+
+  // 1️⃣ Create platform adapter
+  const adapter = new GoogleMeetAdapter(userDataDir)
 
   try {
-    const { page, context } = await joinMeeting(meetUrl);
+    // 2️⃣ Join the meeting (platform responsibility)
+    await adapter.join(meetingUrl)
+    await adapter.waitUntilReady()
 
-    logger.info('Joined the meeting! Waiting 30 seconds to confirm...');
-    await page.waitForTimeout(30000);
+    // 3️⃣ Record the meeting (recorder responsibility)
+    await recordMeeting({
+      page: adapter.getPage(),
+      meetingId,
+      durationMs: 30 * 1000, // 30 seconds
+    })
 
-    await context.close();
-    logger.info('Test finished successfully.');
-  } catch (err) {
-    logger.error('Error during testJoinMeet:', err);
+    console.log('Test recording finished')
+  } finally {
+    // 4️⃣ Always clean up browser
+    await adapter.leave()
   }
 }
 
-test();
-
+main().catch(err => {
+  console.error('Test recorder failed:', err)
+  process.exit(1)
+})
 

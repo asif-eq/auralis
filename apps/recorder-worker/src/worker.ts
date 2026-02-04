@@ -41,7 +41,7 @@ export class Worker {
 
       // Stop recording
       logger.info('Stopping recording...');
-      stopRecording(ffmpegProcess);
+      // stopRecording(ffmpegProcess);
 
       // Upload recording
       logger.info('Uploading recording...');
