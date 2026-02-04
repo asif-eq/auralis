@@ -1,7 +1,7 @@
 # from diarisation import diarise_audio
 # from diarisation_asr import diarise_audio
 # from diarisation_lite import diarise_audio
-from diarisation_alt import diarise_audio
+from diarisation_pa import diarise_audio
 
 
 import json
@@ -9,7 +9,7 @@ import json
 
 folder = '/Users/asif/create/huzzle-workspace/auralis/misc/samples/'
 
-file = 'sample1.wav'
+file = 'sample1_000.wav'
 # file = 'test_meeting.webm'
 
 audio_path = folder + file

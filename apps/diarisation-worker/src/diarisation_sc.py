@@ -4,7 +4,7 @@ import numpy as np
 import librosa
 
 from resemblyzer import VoiceEncoder, preprocess_wav
-from spectralcluster import SpectralClusterer
+from spectralcluster import SpectralClusterer, LaplacianType
 
 
 def diarise_audio(audio_path: str, model_name: str = "small"):
@@ -66,14 +66,12 @@ def diarise_audio(audio_path: str, model_name: str = "small"):
     print("STEP 6: Clustering speakers")
     print("==============================\n")
 
-    # Import safely
-    from spectralcluster import SpectralClusterer
 
     clusterer = SpectralClusterer(
         min_clusters=2,
         max_clusters=10,
         stop_eigenvalue=0.001,
-        laplacian_type="normalized",
+        laplacian_type=LaplacianType.NORMALIZED,
         refinement_options=None
 )
 
