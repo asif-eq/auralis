@@ -74,7 +74,7 @@ export async function recordMeeting({
 
   fs.writeFileSync(outputPath, Buffer.from(audioData))
 
-  console.log(`✅ Recording saved → ${outputPath}`)
+  console.log(`Recording saved → ${outputPath}`)
 
   // Give Chrome time to release media streams
   await page.waitForTimeout(1000)

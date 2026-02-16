@@ -54,100 +54,116 @@ def run_transcription(audio_path: str, model_size="medium"):
 
 
 # ---------------------------------------------------------
-# 3. SPLIT ASR SEGMENTS AT DIAR BOUNDARIES (Solution 2)
+# 3. ALIGNER FUNCTION (PRODUCTION METHOD)
 # ---------------------------------------------------------
-def split_asr_by_diar_boundaries(diar_segments, asr_segments):
+def compute_overlap(a_start, a_end, b_start, b_end):
+    return max(0.0, min(a_end, b_end) - max(a_start, b_start))
+
+
+def assign_speaker_to_asr(asr_segments, diar_segments):
     """
-    Produces fine-grained ASR chunks that align exactly with diarisation boundaries.
+    Assign speaker to each ASR segment using maximum overlap.
+    This preserves Whisper text integrity.
     """
 
     aligned = []
 
-    for d in diar_segments:
-        d_start = d["start"]
-        d_end = d["end"]
+    diar_idx = 0
+    diar_len = len(diar_segments)
 
-        for a in asr_segments:
-            a_start = a["start"]
-            a_end = a["end"]
+    for asr in asr_segments:
 
-            # If no overlap, skip
-            if a_end <= d_start or a_start >= d_end:
-                continue
+        best_speaker = None
+        best_overlap = 0.0
 
-            # Compute overlap boundaries
-            overlap_start = max(d_start, a_start)
-            overlap_end = min(d_end, a_end)
+        a_start = asr["start"]
+        a_end = asr["end"]
 
-            # Extract proportional text slice
-            full_text = a["text"]
-            full_duration = a_end - a_start
-            if full_duration <= 0:
-                continue
+        # advance diar pointer for efficiency
+        while diar_idx < diar_len and diar_segments[diar_idx]["end"] <= a_start:
+            diar_idx += 1
 
-            # Estimate text slice by proportional duration
-            ratio_start = (overlap_start - a_start) / full_duration
-            ratio_end = (overlap_end - a_start) / full_duration
+        check_idx = diar_idx
 
-            start_idx = int(ratio_start * len(full_text))
-            end_idx = int(ratio_end * len(full_text))
+        # check overlapping diar segments
+        while check_idx < diar_len and diar_segments[check_idx]["start"] < a_end:
 
-            sliced_text = full_text[start_idx:end_idx].strip()
+            diar = diar_segments[check_idx]
 
-            aligned.append({
-                "start": overlap_start,
-                "end": overlap_end,
-                "speaker_id": d["speaker_id"],
-                "text": sliced_text,
-            })
+            overlap = compute_overlap(
+                a_start, a_end,
+                diar["start"], diar["end"]
+            )
+
+            if overlap > best_overlap:
+                best_overlap = overlap
+                best_speaker = diar["speaker_id"]
+
+            check_idx += 1
+
+        aligned.append({
+            "start": a_start,
+            "end": a_end,
+            "speaker_id": best_speaker if best_speaker else "UNKNOWN",
+            "text": asr["text"],
+        })
 
     return aligned
 
 
 # ---------------------------------------------------------
-# 4. MERGE SPLIT CHUNKS INTO FINAL SPEAKER TURNS
+# 4. OPTIONAL MERGE FOR CLEANER OUTPUT
 # ---------------------------------------------------------
-def merge_aligned_chunks(aligned_chunks):
+def merge_same_speaker_segments(segments, max_gap=0.5):
     """
-    Merges consecutive chunks from the same speaker into final readable segments.
+    Merge consecutive segments from same speaker for readability.
     """
 
-    if not aligned_chunks:
+    if not segments:
         return []
 
     merged = []
-    current = aligned_chunks[0].copy()
+    current = segments[0].copy()
 
-    for chunk in aligned_chunks[1:]:
-        same_speaker = chunk["speaker_id"] == current["speaker_id"]
-        continuous = abs(chunk["start"] - current["end"]) < 0.3
+    for seg in segments[1:]:
 
-        if same_speaker and continuous:
-            current["end"] = chunk["end"]
-            current["text"] += " " + chunk["text"]
+        same_speaker = seg["speaker_id"] == current["speaker_id"]
+        gap = seg["start"] - current["end"]
+
+        if same_speaker and gap <= max_gap:
+            current["end"] = seg["end"]
+            current["text"] += " " + seg["text"]
         else:
             merged.append(current)
-            current = chunk.copy()
+            current = seg.copy()
 
     merged.append(current)
     return merged
-
 
 # ---------------------------------------------------------
 # 5. MAIN PIPELINE
 # ---------------------------------------------------------
 def diarise_with_text(audio_path: str, hf_token: str, num_speakers=None):
+
     diar_segments = run_diarisation(audio_path, hf_token, num_speakers)
     asr_segments = run_transcription(audio_path)
 
-    aligned_chunks = split_asr_by_diar_boundaries(diar_segments, asr_segments)
-    final_segments = merge_aligned_chunks(aligned_chunks)
+    aligned_segments = assign_speaker_to_asr(
+        asr_segments,
+        diar_segments
+    )
+
+    final_segments = merge_same_speaker_segments(
+        aligned_segments
+    )
 
     return {
         "diarisation_segments": diar_segments,
         "asr_segments": asr_segments,
+        "aligned_segments": aligned_segments,
         "final_segments": final_segments,
     }
+
 
 
 
@@ -167,7 +183,7 @@ if __name__ == "__main__":
     
 
     # file = 'sample1.wav'
-    file = 'sample2.wav'
+    file = 'sample3.wav'
     # file = 'sample1_000.wav'
     # file = 'sample1_000_001.wav'
 

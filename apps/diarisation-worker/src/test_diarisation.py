@@ -10,8 +10,8 @@ hf_token=os.environ["HF_TOKEN"]
 
 folder = '/Users/asif/create/huzzle-workspace/auralis/misc/samples/'
 
-file = 'sample1_000.wav'
-# file = 'test_meeting.webm'
+# file = 'sample1_000.wav'
+file = 'sample1.wav'
 
 audio_path = folder + file
 
