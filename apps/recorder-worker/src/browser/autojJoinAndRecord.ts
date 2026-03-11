@@ -11,7 +11,7 @@ async function startRecording(meetingId: string) {
   const output = path.resolve(`./recordings/${meetingId}-${timestamp}.mkv`);
   fs.mkdirSync('./recordings', { recursive: true });
 
-  console.log(`🎥 Recording started -> ${output}`);
+  console.log(`Recording started -> ${output}`);
 
   const ffmpeg = spawn('ffmpeg', [
     '-f', 'avfoundation',
@@ -26,10 +26,10 @@ async function startRecording(meetingId: string) {
 
   ffmpeg.stderr.on('data', data => {
     const text = data.toString();
-    if (text.includes('frame=')) process.stdout.write(`🟢 Capturing video...\r`);
+    if (text.includes('frame=')) process.stdout.write(`Capturing video...\r`);
   });
 
-  ffmpeg.on('close', () => console.log(`📁 Recording saved -> ${output}`));
+  ffmpeg.on('close', () => console.log(`Recording saved -> ${output}`));
 
   return ffmpeg;
 }
@@ -74,18 +74,18 @@ async function main() {
     try {
       await page.waitForSelector(selector, { timeout: 4000 });
       await page.click(selector);
-      console.log(`🚀 Joined using selector → ${selector}`);
+      console.log(`Joined using selector → ${selector}`);
       joined = true;
       break;
     } catch {}
   }
 
   if (!joined) {
-    console.log("⚠ Join UI didn’t appear — maybe in waiting room or already in call.");
+    console.log("Join UI didn’t appear — maybe in waiting room or already in call.");
     return;
   }
 
-  console.log("🎥 You're now inside the meeting — starting recording...");
+  console.log("You're now inside the meeting — starting recording...");
 
   // Start recording (timestamped)
   const ffmpeg = await startRecording('test-meeting');

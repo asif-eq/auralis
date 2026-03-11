@@ -1,222 +1,289 @@
-import uuid
-from pyannote.audio import Pipeline
-import whisper
-import time
 import os
-import json
+import uuid
+from time import perf_counter
+from datetime import timedelta
+from typing import List, Dict
+
+import whisper
+from pyannote.audio import Pipeline
 
 
+# =========================================================
+# GLOBAL MODEL CACHE (CRITICAL FOR PERFORMANCE)
+# =========================================================
+
+WHISPER_MODEL = None
+DIAR_PIPELINE = None
 
 
+def load_models(hf_token: str, whisper_size: str = "medium"):
+    """
+    Load models once and reuse (huge performance gain).
+    """
 
-# ---------------------------------------------------------
-# 1. DIARISATION FUNCTION (pyannote)
-# ---------------------------------------------------------
-def run_diarisation(audio_path: str, hf_token: str, num_speakers=None):
-    pipeline = Pipeline.from_pretrained(
-        "pyannote/speaker-diarization-3.1",
-        use_auth_token=hf_token,
-    )
+    global WHISPER_MODEL, DIAR_PIPELINE
 
-    if num_speakers is not None:
-        diarization = pipeline(audio_path, num_speakers=num_speakers)
+    if WHISPER_MODEL is None:
+        print("Loading Whisper model...")
+        WHISPER_MODEL = whisper.load_model(whisper_size)
+
+    if DIAR_PIPELINE is None:
+        print("Loading pyannote pipeline...")
+        DIAR_PIPELINE = Pipeline.from_pretrained(
+            "pyannote/speaker-diarization-3.1",
+            use_auth_token=hf_token,
+        )
+
+
+# =========================================================
+# DIARISATION
+# =========================================================
+
+def run_diarisation(audio_path: str, num_speakers=None) -> List[Dict]:
+
+    if num_speakers:
+        diarization = DIAR_PIPELINE(audio_path, num_speakers=num_speakers)
     else:
-        diarization = pipeline(audio_path)
+        diarization = DIAR_PIPELINE(audio_path)
 
-    diar_segments = []
+    segments = []
+
     for turn, _, speaker in diarization.itertracks(yield_label=True):
-        diar_segments.append({
+
+        segments.append({
             "segment_id": str(uuid.uuid4()),
             "start": float(turn.start),
             "end": float(turn.end),
-            "speaker_id": str(speaker),
+            "speaker_id": speaker,
         })
 
-    return diar_segments
+    return segments
 
 
-# ---------------------------------------------------------
-# 2. TRANSCRIPTION FUNCTION (Whisper)
-# ---------------------------------------------------------
-def run_transcription(audio_path: str, model_size="medium"):
-    model = whisper.load_model(model_size)
-    result = model.transcribe(audio_path)
+# =========================================================
+# TRANSCRIPTION (WORD LEVEL)
+# =========================================================
 
-    asr_segments = []
-    for seg in result["segments"]:
-        asr_segments.append({
-            "start": seg["start"],
-            "end": seg["end"],
-            "text": seg["text"].strip(),
-        })
+def run_transcription(audio_path: str) -> List[Dict]:
 
-    return asr_segments
+    result = WHISPER_MODEL.transcribe(
+        audio_path,
+        word_timestamps=True,
+        verbose=False,
+    )
+
+    return result["segments"]
 
 
-# ---------------------------------------------------------
-# 3. ALIGNER FUNCTION (PRODUCTION METHOD)
-# ---------------------------------------------------------
+# =========================================================
+# ALIGNMENT CORE
+# =========================================================
+
 def compute_overlap(a_start, a_end, b_start, b_end):
+
     return max(0.0, min(a_end, b_end) - max(a_start, b_start))
 
 
-def assign_speaker_to_asr(asr_segments, diar_segments):
+def assign_speakers_to_words(asr_segments, diar_segments, tolerance=0.2):
+
+    aligned_words = []
+
+    last_speaker = None
+
+    for seg in asr_segments:
+
+        for word in seg.get("words", []):
+
+            w_start = word["start"]
+            w_end = word["end"]
+
+            best_speaker = None
+            best_overlap = 0.0
+
+            # Pass 1: overlap with tolerance window
+            for diar in diar_segments:
+
+                overlap = compute_overlap(
+                    w_start - tolerance,
+                    w_end + tolerance,
+                    diar["start"],
+                    diar["end"]
+                )
+
+                if overlap > best_overlap:
+                    best_overlap = overlap
+                    best_speaker = diar["speaker_id"]
+
+            # Pass 2: nearest speaker fallback
+            if best_speaker is None:
+
+                closest_dist = float("inf")
+
+                for diar in diar_segments:
+
+                    dist = min(
+                        abs(w_start - diar["end"]),
+                        abs(w_end - diar["start"])
+                    )
+
+                    if dist < closest_dist:
+                        closest_dist = dist
+                        best_speaker = diar["speaker_id"]
+
+            # Pass 3: speaker persistence smoothing
+            if last_speaker and best_speaker != last_speaker:
+
+                # small words (<0.4s) likely misassigned
+                word_duration = w_end - w_start
+
+                if word_duration < 0.4:
+                    best_speaker = last_speaker
+
+            aligned_words.append({
+                "start": w_start,
+                "end": w_end,
+                "speaker_id": best_speaker,
+                "word": word["word"],
+            })
+
+            last_speaker = best_speaker
+
+    return aligned_words
+
+
+
+# =========================================================
+# MERGE WORDS INTO CLEAN SEGMENTS
+# =========================================================
+
+def merge_words(words, max_gap=0.5, min_segment_duration=1.0):
     """
-    Assign speaker to each ASR segment using maximum overlap.
-    This preserves Whisper text integrity.
+    Merge words into readable segments with smoothing.
     """
 
-    aligned = []
-
-    diar_idx = 0
-    diar_len = len(diar_segments)
-
-    for asr in asr_segments:
-
-        best_speaker = None
-        best_overlap = 0.0
-
-        a_start = asr["start"]
-        a_end = asr["end"]
-
-        # advance diar pointer for efficiency
-        while diar_idx < diar_len and diar_segments[diar_idx]["end"] <= a_start:
-            diar_idx += 1
-
-        check_idx = diar_idx
-
-        # check overlapping diar segments
-        while check_idx < diar_len and diar_segments[check_idx]["start"] < a_end:
-
-            diar = diar_segments[check_idx]
-
-            overlap = compute_overlap(
-                a_start, a_end,
-                diar["start"], diar["end"]
-            )
-
-            if overlap > best_overlap:
-                best_overlap = overlap
-                best_speaker = diar["speaker_id"]
-
-            check_idx += 1
-
-        aligned.append({
-            "start": a_start,
-            "end": a_end,
-            "speaker_id": best_speaker if best_speaker else "UNKNOWN",
-            "text": asr["text"],
-        })
-
-    return aligned
-
-
-# ---------------------------------------------------------
-# 4. OPTIONAL MERGE FOR CLEANER OUTPUT
-# ---------------------------------------------------------
-def merge_same_speaker_segments(segments, max_gap=0.5):
-    """
-    Merge consecutive segments from same speaker for readability.
-    """
-
-    if not segments:
+    if not words:
         return []
 
-    merged = []
-    current = segments[0].copy()
+    segments = []
 
-    for seg in segments[1:]:
+    current = {
+        "speaker_id": words[0]["speaker_id"],
+        "start": words[0]["start"],
+        "end": words[0]["end"],
+        "words": [words[0]],
+    }
 
-        same_speaker = seg["speaker_id"] == current["speaker_id"]
-        gap = seg["start"] - current["end"]
+    for w in words[1:]:
 
-        if same_speaker and gap <= max_gap:
-            current["end"] = seg["end"]
-            current["text"] += " " + seg["text"]
+        gap = w["start"] - current["end"]
+        duration = current["end"] - current["start"]
+
+        same_speaker = w["speaker_id"] == current["speaker_id"]
+
+        # allow tiny intrusions if segment too short
+        allow_intrusion = duration < min_segment_duration
+
+        if same_speaker or allow_intrusion:
+
+            current["end"] = w["end"]
+            current["words"].append(w)
+
         else:
-            merged.append(current)
-            current = seg.copy()
 
-    merged.append(current)
-    return merged
+            segments.append(current)
 
-# ---------------------------------------------------------
-# 5. MAIN PIPELINE
-# ---------------------------------------------------------
-def diarise_with_text(audio_path: str, hf_token: str, num_speakers=None):
+            current = {
+                "speaker_id": w["speaker_id"],
+                "start": w["start"],
+                "end": w["end"],
+                "words": [w],
+            }
 
-    diar_segments = run_diarisation(audio_path, hf_token, num_speakers)
+    segments.append(current)
+
+    # convert words → text
+    final = []
+
+    for seg in segments:
+
+        text = " ".join(w["word"] for w in seg["words"])
+
+        final.append({
+            "speaker_id": seg["speaker_id"],
+            "start": seg["start"],
+            "end": seg["end"],
+            "text": text,
+        })
+
+    return final
+
+
+
+# =========================================================
+# MAIN PIPELINE
+# =========================================================
+
+def diarise(audio_path: str, hf_token: str, num_speakers=None):
+
+    load_models(hf_token)
+
+    diar_segments = run_diarisation(audio_path, num_speakers)
+
     asr_segments = run_transcription(audio_path)
 
-    aligned_segments = assign_speaker_to_asr(
+    aligned_words = assign_speakers_to_words(
         asr_segments,
-        diar_segments
+        diar_segments,
     )
 
-    final_segments = merge_same_speaker_segments(
-        aligned_segments
-    )
+    final_segments = merge_words(aligned_words)
 
     return {
-        "diarisation_segments": diar_segments,
-        "asr_segments": asr_segments,
-        "aligned_segments": aligned_segments,
-        "final_segments": final_segments,
+        "segments": final_segments,
+        "words": aligned_words,
+        "diarisation": diar_segments,
     }
 
 
+# =========================================================
+# TIMER UTILITY
+# =========================================================
 
+def elapsed_time(start):
+
+    elapsed = perf_counter() - start
+
+    return str(timedelta(seconds=int(elapsed)))
+
+
+# =========================================================
+# ENTRYPOINT
+# =========================================================
 
 if __name__ == "__main__":
- 
 
-    start = time.time()
+    start = perf_counter()
 
-    AUDIO_FILE = "your_audio.wav"
-    
-
-    token=os.environ["HF_TOKEN"]
-
-    # folder = '/Users/asif/create/huzzle-workspace/auralis/misc/samples/'
+    HF_TOKEN = os.environ["HF_TOKEN"]
 
     folder = '/Users/asif/create/huzzle-workspace/auralis/misc/meetings/'
-    
 
     # file = 'sample1.wav'
     file = 'sample3.wav'
-    # file = 'sample1_000.wav'
-    # file = 'sample1_000_001.wav'
 
-    # file = 'Huzzle+Interview+_+Vinay+Singh+and+Luyanda+Hlongwa_2026-02-05T13_15_00Z.mp4'
+    audio_file = folder + file
 
-    result = diarise_with_text(
-        audio_path=folder+file,
-        hf_token=token
-#        ,num_speakers=3
+    result = diarise(
+        audio_file,
+        HF_TOKEN,
     )
 
-    print("\n=== PYANNOTE DIARISATION SEGMENTS ===")
-    for seg in result["diarisation_segments"]:
-        print(seg)
+    print("\nFINAL SEGMENTS:\n")
 
-        # print(json.dumps(result['diar_final_segments'], indent=2))
+    for seg in result["segments"]:
 
-    print("\n=== WHISPER ASR SEGMENTS ===")
-    for seg in result["asr_segments"]:
-        print(seg)
+        print(
+            f'{seg["speaker_id"]}: {seg["text"]}'
+        )
 
-        # print(json.dumps(result['asr_final_segments'], indent=2))
-
-    print("\n=== FINAL MERGED SPEAKER SEGMENTS ===")
-    for seg in result["final_segments"]:
-        print(seg)
-
-        # print(json.dumps(result['merged_final_segments'], indent=2))
-
-    elapsed = int(time.time() - start)
-
-    h = elapsed // 3600
-    m = (elapsed % 3600) // 60
-    s = elapsed % 60
-
-    print(f'Total Elapsed time is = {h:02}:{m:02}:{s:02}')
+    print("\nElapsed:", elapsed_time(start))

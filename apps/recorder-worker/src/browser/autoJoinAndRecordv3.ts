@@ -71,7 +71,7 @@ async function main() {
   // 🔗 Your Meet link
   await page.goto('https://meet.google.com/qwr-umng-kuy');
 
-  console.log('🔍 Searching for Join buttons...');
+  console.log('Searching for Join buttons...');
 
   const selectors = [
     'button[jsname="Qx7uuf"]',

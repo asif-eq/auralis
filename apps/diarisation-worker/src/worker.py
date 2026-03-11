@@ -1,6 +1,6 @@
 import json
 import sys
-from diarisation import diarise_audio
+from diarisation_wx import diarise_audio
 
 if __name__ == "__main__":
     """
