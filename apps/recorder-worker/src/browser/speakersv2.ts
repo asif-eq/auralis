@@ -9,6 +9,88 @@ function sleep(ms: number) {
   return new Promise(resolve => setTimeout(resolve, ms))
 }
 
+async function disableMicAndCamera(page: Page) {
+
+  const mic = page.locator('button[aria-label*="microphone"]')
+  const cam = page.locator('button[aria-label*="camera"]')
+
+  try {
+    const micMuted = await mic.getAttribute('data-is-muted')
+
+    if (micMuted === 'false') {
+      console.log('Muting microphone...')
+      await mic.click()
+    }
+  } catch {
+    console.log('Mic button not found')
+  }
+
+  try {
+    const camMuted = await cam.getAttribute('data-is-muted')
+
+    if (camMuted === 'false') {
+      console.log('Turning camera off...')
+      await cam.click()
+    }
+  } catch {
+    console.log('Camera button not found')
+  }
+
+}
+
+async function handleSwitchHere(page: Page) {
+  try {
+    const switchHere = page.getByRole('button', { name: /switch here/i })
+    if (await switchHere.isVisible({ timeout: 5000 })) {
+      console.log('Clicking Switch here...')
+      await switchHere.click()
+    }
+  } catch {}
+}
+
+async function clickJoinButtons(page: Page) {
+  try {
+    const joinNow = page.getByRole('button', { name: /join now/i })
+
+    if (await joinNow.isVisible({ timeout: 5000 })) {
+      console.log('Clicking Join now...')
+      await joinNow.click()
+      return
+    }
+  } catch {}
+
+  try {
+    const askToJoin = page.getByRole('button', { name: /ask to join/i })
+
+    if (await askToJoin.isVisible({ timeout: 5000 })) {
+      console.log('Clicking Ask to join...')
+      await askToJoin.click()
+      return
+    }
+  } catch {}
+
+  console.log('No join button found.')
+}
+
+async function waitForMeetingJoin(page: Page) {
+
+  try {
+
+    await page.waitForSelector(
+      'button[aria-label*="Leave call"]',
+      { timeout: 60000 }
+    )
+
+    console.log('Successfully joined meeting')
+
+  } catch {
+
+    console.log('Meeting join state not detected')
+
+  }
+
+}
+
 async function injectSpeakerTracker(page: Page) {
   await page.evaluate(`
     (() => {
@@ -89,6 +171,17 @@ async function getSpeakers(page: Page) {
   })
 }
 
+async function waitForMeetingEnd(page: Page) {
+  await page.waitForSelector(
+    'button[aria-label*="Leave call"]',
+    { state: 'detached' ,
+    timeout: 0
+  }
+  )
+
+  console.log('Meeting ended')
+}
+
 async function main() {
 
   const userDataDir = path.resolve(
@@ -103,15 +196,33 @@ async function main() {
 
   const page: Page = await context.newPage()
 
+  console.log('Opening meeting:', MEET_URL)
+
   await page.goto(MEET_URL)
 
-  console.log('Waiting for meeting UI...')
-  await sleep(5000)
+  await page.waitForTimeout(6000)
+
+  // await disableMicAndCamera(page)
+  
+  await clickJoinButtons(page) 
+
+  await handleSwitchHere(page)
+
+  await waitForMeetingJoin(page)
+
+  await disableMicAndCamera(page)
 
   await injectSpeakerTracker(page)
 
-  console.log('Tracking speakers for 120 seconds...')
-  await sleep(120000)
+
+  console.log('Tracking speakers...')
+
+  await Promise.race([
+    sleep(120000),
+    waitForMeetingEnd(page)
+  ])
+
+ console.log('Stopping recorder')
 
   const speakers = await getSpeakers(page)
 
@@ -123,12 +234,10 @@ async function main() {
     `./recordings/speakers_${timestamp}.json`
   )
 
-fs.writeFileSync(
-  output,
-  JSON.stringify(speakers, null, 2)
-)
-
-
+  fs.writeFileSync(
+    output,
+    JSON.stringify(speakers, null, 2)
+  )
 
   console.log('Saved speaker timeline →', output)
 
