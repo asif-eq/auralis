@@ -1,6 +1,8 @@
 import { chromium, BrowserContext, Page } from 'playwright'
 import fs from 'fs'
 import path from 'path'
+import { spawn } from 'child_process'
+
 
 // const MEET_URL = 'https://meet.google.com/qwr-umng-kuy'
 const MEET_URL = 'https://meet.google.com/kba-bhqk-jjh'
@@ -36,6 +38,56 @@ async function disableMicAndCamera(page: Page) {
     console.log('Camera button not found')
   }
 
+}
+
+async function getWindowBounds(page: Page) {
+  return page.evaluate(() => {
+    return {
+      x: window.screenX,
+      y: window.screenY,
+      width: window.outerWidth,
+      height: window.outerHeight
+    }
+  })
+}
+
+async function startRecording(meetingId: string, bounds: any) {
+  const timestamp = new Date().toISOString().replace(/[:.]/g, '-')
+  const outputDir = path.resolve('./recordings')
+  fs.mkdirSync(outputDir, { recursive: true })
+
+  const output = path.join(outputDir, `${meetingId}_${timestamp}.mkv`)
+
+  console.log(`Recording started -> ${output}`)
+
+  const cropFilter = `crop=${bounds.width}:${bounds.height}:${bounds.x}:${bounds.y}`
+
+  const ffmpeg = spawn(
+    'ffmpeg',
+    [
+      '-f', 'avfoundation',
+      '-framerate', '30',
+      '-i', '3:1',
+      '-vf', cropFilter,
+      '-probesize', '100M',
+      '-analyzeduration', '100M',
+      '-vcodec', 'libx264',
+      '-preset', 'fast',
+      '-pix_fmt', 'yuv420p',
+      '-acodec', 'aac',
+      '-b:a', '128k',
+      output
+    ],
+    {
+      stdio: 'inherit'
+    }
+  )
+
+  ffmpeg.on('close', () => {
+    console.log(`📁 Recording saved -> ${output}`)
+  })
+
+  return ffmpeg
 }
 
 async function handleSwitchHere(page: Page) {
@@ -138,7 +190,7 @@ async function injectSpeakerTracker(page: Page) {
 
             if (
               name !== lastSpeaker &&
-              now - lastChange > 500
+              now - lastChange > 1500
             ) {
 
               lastSpeaker = name;
@@ -184,8 +236,9 @@ async function waitForMeetingEnd(page: Page) {
 
 async function main() {
 
-  // const userDataDir = path.resolve('/Users/asif/Library/Application Support/Google/Chrome/AuralisBot')
-  const userDataDir = path.resolve('/Users/asif/create/huzzle-workspace/auralis/misc/profiles/Bot2')
+  const userDataDir = path.resolve(
+    '/Users/asif/Library/Application Support/Google/Chrome/AuralisBot'
+  )
 
   const context: BrowserContext =
     await chromium.launchPersistentContext(userDataDir, {
@@ -194,6 +247,8 @@ async function main() {
     })
 
   const page: Page = await context.newPage()
+
+
 
   console.log('Opening meeting:', MEET_URL)
 
@@ -209,6 +264,10 @@ async function main() {
 
   await waitForMeetingJoin(page)
 
+  const bounds = await getWindowBounds(page)
+
+  const ffmpegProcess = await startRecording('meeting', bounds)
+
   await disableMicAndCamera(page)
 
   await injectSpeakerTracker(page)
@@ -221,7 +280,9 @@ async function main() {
     waitForMeetingEnd(page)
   ])
 
- console.log('Stopping recorder')
+  console.log('Stopping recorder')
+
+  ffmpegProcess.kill('SIGINT')
 
   const speakers = await getSpeakers(page)
 

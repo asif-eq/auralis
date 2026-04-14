@@ -12,6 +12,7 @@ async function startRecording(meetingId: string) {
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
   const outputDir = path.resolve('./recordings');
   fs.mkdirSync(outputDir, { recursive: true });
+  
   const output = path.join(outputDir, `${meetingId}_${timestamp}.mkv`);
 
   console.log(`Recording started -> ${output}`);
@@ -36,7 +37,7 @@ async function startRecording(meetingId: string) {
   );
 
   ffmpeg.on('close', () => {
-    console.log(`📁 Recording saved -> ${output}`);
+    console.log(`Recording saved -> ${output}`);
   });
 
   return ffmpeg;

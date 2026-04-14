@@ -91,20 +91,22 @@ async function getSpeakers(page: Page) {
 
 async function main() {
 
-  const userDataDir = path.resolve(
-    '/Users/asif/Library/Application Support/Google/Chrome/AuralisBot'
-  )
+  // const userDataDir = path.resolve('/Users/asif/Library/Application Support/Google/Chrome/AuralisBot')
+  const userDataDir = path.resolve('/Users/asif/Library/Application Support/Google/Chrome')
+  // const userDataDir = path.resolve('/Users/asif/create/huzzle-workspace/auralis/misc/profiles/AuralisBot')
+  // const userDataDir = path.resolve('/Users/asif/create/huzzle-workspace/auralis/misc/profiles/Bot2')
 
   const context: BrowserContext =
     await chromium.launchPersistentContext(userDataDir, {
       headless: false,
-      channel: 'chrome'
+      channel: 'chrome',
+      ignoreDefaultArgs: ['--use-mock-keychain']
     })
 
   const page: Page = await context.newPage()
 
-  await page.goto(MEET_URL)
-
+  // await page.goto(MEET_URL)
+  await page.goto('https://accounts.google.com')
   console.log('Waiting for meeting UI...')
   await sleep(5000)
 
